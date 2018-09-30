@@ -53,4 +53,4 @@ git apply ~/8.8.diff
 
 # 7.登录修改密码
 
-![iamge](img/01.png?raw=true)
+![iamge](img/01.png)
