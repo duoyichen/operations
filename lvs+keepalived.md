@@ -1,7 +1,5 @@
 # Lvs+Keepalived高可用负载均衡
-#### By：大官人
-#### Email：DaGuanR@gmail.com
-#### QQ：375739049
+<br><br><br>
 ## 一.ARP协议
 ### 1.1什么是arp协议
 地址解析协议，即ARP（Address Resolution Protocol），是根据IP地址获取物理地址的一个TCP/IP协议。主机发送信息时将包含目标IP地址的ARP请求广播到网络上的所有主机，并接收返回消息，以此确定目标的物理地址；收到返回消息后将该IP地址和物理地址存入本机ARP缓存中并保留一定时间，下次请求时直接查询ARP缓存以节约资源。地址解析协议是建立在网络中各个主机互相信任的基础上的，网络上的主机可以自主发送ARP应答消息，其他主机收到应答报文时不会检测该报文的真实性就会将其记入本机ARP缓存；由此攻击者就可以向某一主机发送伪ARP应答报文，使其发送的信息无法到达预期的主机或到达错误的主机，这就构成了一个ARP欺骗。ARP命令可用于查询本机ARP缓存中IP地址和MAC地址的对应关系、添加或删除静态对应关系等。相关协议有RARP、代理ARP。NDP用于在IPv6中代替地址解析协议。
@@ -23,21 +21,18 @@ C1和PC2虽然属于不同的广播域，但它们处于同一网段中，因此
 LVS集群采用IP负载均衡技术和基于内容请求分发技术。调度器具有很好的吞吐率，将请求均衡地转移到不同的服务器上执行，且调度器自动屏蔽掉服务器的故障，从而将一组服务器构成一个高性能的、高可用的虚拟服务器。整个服务器集群的结构对客户是透明的，而且无需修改客户端和服务器端的程序。为此，在设计时需要考虑系统的透明性、可伸缩性、高可用性和易管理性。
 ### 2.2lvs三种基本模型
 #### 2.2.1lvs-DR模型是lvs的默认模型，也是企业中用到的最多的模型
-![image](https://github.com/yangzinan/Operations/blob/master/iamge/lvs+keepalived/01.png?raw=true)
 
 `LVS_NAT模型，通常应用与rs较少，rs节点无要求，端口转换的场景`
 
 `解读：地址转换模型，vs通过修改目的ip将报文发送到rs.rs通过dip网关将报文发给vs,vs再将报文的源ip进行修改发送给客户端`
 
 ### 2.2.2LVS-TUN 模式
-![image](https://github.com/yangzinan/Operations/blob/master/iamge/lvs+keepalived/02.png?raw=true)
 
 `lvs-TUN模型可以运用于异地机房的负载调度上。`
 
 `解读：隧道模型，跟DR模型比较相似，都是由rs直接回复给cs .跟dr模型不同的是，vs和rs之间可以存在路由，原因是tun模型在报文源ip和目的ip后又加入了一层源ip和目的ip的信息。`
 
 ### 2.2.3LVS-NAT 模式
-![image](https://github.com/yangzinan/Operations/blob/master/iamge/lvs+keepalived/03.png?raw=true)
 
 `LVS_NAT模型，通常应用与rs较少，rs节点无要求，端口转换的场景`
 
