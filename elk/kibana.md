@@ -1,7 +1,7 @@
 # Kibana
-#### By：大官人
-#### Email：DaGuanR@gmail.com
-#### QQ：375739049
+<br><br><br>
+
+
 
 # 一.安装jdk
 
