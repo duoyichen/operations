@@ -1,0 +1,129 @@
+
+
+
+
+
+wget -c http://175.25.181.252/o/s/lnmp1.4-full.tar.gz && tar zxf lnmp1.4-full.tar.gz && cd lnmp1.4-full && ./install.sh lamp
+
+mysql root 密码 root
+
+
+
+
+
+yum -y install pdns pdns-backend-mysql
+
+
+
+mysql -u root -proot
+
+CREATE DATABASE powerdns;
+
+
+GRANT ALL PRIVILEGES ON powerdns.* TO 'power_admin'@'%' IDENTIFIED BY 'power_admin_password' with grant option ;
+GRANT ALL PRIVILEGES ON powerdns.* TO 'power_admin'@'localhost' IDENTIFIED BY 'power_admin_password' with grant option ;
+GRANT ALL PRIVILEGES ON powerdns.* TO 'root'@'%' IDENTIFIED BY 'root' with grant option ;
+GRANT ALL PRIVILEGES ON powerdns.* TO 'root'@'localhost' IDENTIFIED BY 'root' with grant option ;
+
+flush privileges;
+
+
+
+CREATE TABLE domains (
+id INT auto_increment,
+name VARCHAR(128) NOT NULL,
+master VARCHAR(64) DEFAULT NULL,
+last_check INT DEFAULT NULL,
+type VARCHAR(6) NOT NULL,
+notified_serial INT DEFAULT NULL,
+account VARCHAR(40) DEFAULT NULL,
+primary key (id)
+);
+
+CREATE UNIQUE INDEX name_index ON domains(name);
+
+CREATE TABLE records (
+id INT auto_increment,
+domain_id INT DEFAULT NULL,
+name VARCHAR(128) DEFAULT NULL,
+type VARCHAR(6) DEFAULT NULL,
+content VARCHAR(128) DEFAULT NULL,
+ttl INT DEFAULT NULL,
+prio INT DEFAULT NULL,
+change_date INT DEFAULT NULL,
+primary key(id)
+);
+
+CREATE INDEX rec_name_index ON records(name);
+CREATE INDEX nametype_index ON records(name,type);
+CREATE INDEX domain_id ON records(domain_id);
+CREATE TABLE supermasters (
+ip VARCHAR(25) NOT NULL,
+nameserver VARCHAR(128) NOT NULL,
+account VARCHAR(40) DEFAULT NULL
+);
+
+
+
+vi /etc/pdns/pdns.conf
+
+launch=gmysql
+gmysql-host=127.0.0.1
+gmysql-user=power_admin
+gmysql-password=power_admin_password
+gmysql-dbname=powerdns
+
+
+chkconfig pdns on
+/etc/init.d/pdns start
+
+
+
+
+安装poweradmin
+
+（1）Poweradmin还需要安装两个PEAR软件包。
+
+yum install php-pear-DB php-pear-MDB2-Driver-mysql
+
+
+http://www.poweradmin.org/
+
+下载 
+
+poweradmin-2.1.7.tgz
+
+tar xvfz poweradmin-2.1.7.tgz
+
+mv poweradmin-2.1.7 /home/wwwroot/default/poweradmin
+
+touch inc/config.inc.php
+
+chown -R www:www /home/wwwroot/default/poweradmin/
+
+/etc/init.d/iptables stop
+
+
+
+http://175.25.181.138/poweradmin/install/index.php
+
+rm -rf /home/wwwroot/default/poweradmin/install
+
+http://175.25.181.138/poweradmin
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

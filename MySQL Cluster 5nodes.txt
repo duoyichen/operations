@@ -1,0 +1,572 @@
+
+
+
+
+
+
+启动顺序一定要遵循：MGM→NDB→SQL
+
+注意  iptables  selinux
+
+不行就重启 mysql keepalived
+
+
+
+
+
+
+
+一、前言
+
+MySQL Cluster 是MySQL适合于分布式计算环境的高实用、高冗余版本。
+
+
+
+
+
+二、MySQL Cluster基本概念 
+
+
+角色：
+
+管理(MGM)节点：
+
+数据(NDB)节点：
+
+客户(SQL)节点：
+
+
+
+
+
+三、安装配置
+
+
+
+系统：CentOS6.5 64位 5台
+
+软件包（可以去mysql官网下载http://dev.mysql.com/downloads/cluster/）：
+
+MGM：
+
+MySQL-Cluster-gpl-management-7.1.34-1.el6.x86_64.rpm
+MySQL-Cluster-gpl-tools-7.1.34-1.el6.x86_64.rpm
+
+SQL节点：
+
+MySQL-Cluster-gpl-client-7.1.34-1.el6.x86_64.rpm
+MySQL-Cluster-gpl-server-7.1.34-1.el6.x86_64.rpm
+
+NDB节点：
+
+MySQL-Cluster-gpl-storage-7.1.34-1.el6.x86_64.rpm
+
+
+节点规划：
+
+管理节点（MGM）	        123.58.251.111
+LB_Master（主调度器）	123.58.251.112
+LB_Backup（备调度器）	123.58.251.113
+SQL节点1（SQL1）	123.58.251.112
+SQL节点2（SQL2）	123.58.251.113
+数据节点1（NDB1）	123.58.251.114
+数据节点2（NDB2）	123.58.251.115
+
+
+
+
+
+四、安装配置
+
+
+
+1. 环境初始化
+
+
+安装基础包：
+
+yum install -y openssh-clients
+
+for i in 112 113 114 115 111;do ssh 123.58.251.$i "yum install -y openssh-clients vim wget glibc perl libaio-devel numactl screen";done
+
+
+免密认证：
+
+ssh-keygen
+
+ssh-copy-id 123.58.251.112
+
+ssh-copy-id 123.58.251.113
+
+ssh-copy-id 123.58.251.114
+
+ssh-copy-id 123.58.251.115
+
+
+关闭防火墙，selinux
+
+for i in 112 113 114 115 111;do ssh 123.58.251.$i "/etc/init.d/iptables status";done
+for i in 112 113 114 115 111;do ssh 123.58.251.$i "/etc/init.d/iptables stop";done
+for i in 112 113 114 115 111;do ssh 123.58.251.$i "setenforce 0";done
+
+for i in 112 113 114 115 111;do ssh 123.58.251.$i "chkconfig iptables off";done
+for i in 112 113 114 115 111;do ssh 123.58.251.$i "sed -i 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/selinux/config;setenforce 0";done
+
+
+安装开发包，更新内核：
+
+for i in 112 113 114 115 111;do ssh 123.58.251.$i "yum groupinstall -y 'Additional Development' 'Development tools'";done
+for i in 112 113 114 115 111;do ssh 123.58.251.$i "yum install -y kernel-devel ipvsadm;yum update -y kernel kernel-firmware";done
+
+#yum groupinstall "Additional Development" "Development tools" -y    
+#yum install kernel-devel ipvsadm -y
+#yum update -y kernel kernel-firmware
+
+reboot
+
+uname -r
+2.6.32-642.6.1.el6.x86_64
+
+
+请先卸载掉与mysql有关的所有RPM包：
+
+for i in 112 113 114 115 111;do ssh 123.58.251.$i "rpm -qa | grep mysql";done
+for i in 112 113 114 115 111;do ssh 123.58.251.$i "rpm -e mysql-libs --nodeps";done
+for i in 112 113 114 115 111;do ssh 123.58.251.$i "rpm -e mysql-devel --nodeps";done
+for i in 112 113 114 115 111;do ssh 123.58.251.$i "rpm -qa | grep mysql";done
+
+
+2. LB-Master及LB-Backup配置
+
+
+(1). LB-Master及LB-Backup安装keepalived和ipvsadm
+
+
+#ln -s /usr/src/kernels/2.6.32-642.6.1.el6.x86_64/ /usr/src/Linux
+ln -s /usr/src/kernels/`uname -r`/ /usr/src/Linux
+
+cd /usr/local/src/
+wget http://www.keepalived.org/software/keepalived-1.2.24.tar.gz
+scp keepalived-1.2.24.tar.gz 123.58.251.113:/usr/local/src/
+tar zxvf keepalived-1.2.24.tar.gz
+cd keepalived-1.2.24
+yum install kernel-devel ipvsadm
+ln -s /usr/src/kernels/`uname -r`/ /usr/src/Linux
+./configure
+make && make install && echo $?
+
+cd /usr/local/etc
+cp /usr/local/etc/rc.d/init.d/keepalived /etc/rc.d/init.d/ 
+cp /usr/local/etc/sysconfig/keepalived  /etc/sysconfig/
+
+mkdir /etc/keepalived
+cp /usr/local/etc/keepalived/keepalived.conf /etc/keepalived/
+cp /usr/local/sbin/keepalived /usr/sbin/
+
+
+(2). LB-Master及LB-Backup的keepalived主配置文档
+
+vi /etc/keepalived/keepalived.conf
+i
+
+#guration File for keepalived
+#global define
+
+global_defs {
+        router_id HaMySQL_1
+        }
+vrrp_sync_group VGM {
+        group {
+        VI_MYSQL
+        }
+}
+vrrp_instance VI_MYSQL {
+        state MASTER        ### LB-Backup设置为BACKUP
+        interface eth0
+        lvs_sync_daemon_inteface eth0
+        virtual_router_id 55
+        priority 100        ### LB-Backup设置为90
+        advert_int 5
+        authentication {
+                auth_type PASS
+                auth_pass 123456
+        }
+        virtual_ipaddress {
+                123.58.251.116/27 dev eth0
+        }
+}
+##########  LVS MySQL Start   ###########
+virtual_server 123.58.251.116 3306 {
+        delay_loop 6
+        lb_algo rr
+        lb_kind DR
+        persistence_timeout 6
+        protocol TCP
+ 
+        real_server 123.58.251.112 3306 {
+                weight 100
+                TCP_CHECK {
+                        connect_timeout 3
+                        nb_get_retry 3
+                        delay_before_retry 3
+                        connect_port 3306
+                }
+        }
+        real_server 123.58.251.113 3306 {
+                weight 100
+                TCP_CHECK {
+                        connect_timeout 3
+                        nb_get_retry 3
+                        delay_before_retry 3
+                        connect_port 3306
+                }
+        }
+}
+##########  LVS MySQL END   #############
+
+
+
+
+
+chmod +x /etc/init.d/keepalived 
+service keepalived start
+
+ip addr
+
+ipvsadm -lcn
+
+
+
+3.MGM配置
+
+(1)安装管理节点
+
+cd /var/tmp/7.1.34-1
+rpm -ivh MySQL-Cluster-gpl-management-7.1.34-1.el6.x86_64.rpm
+rpm -ivh MySQL-Cluster-gpl-tools-7.1.34-1.el6.x86_64.rpm
+
+
+(2)配置管理节点
+
+mkdir /etc/mysql-cluster
+vim /etc/mysql-cluster/config.ini
+i
+
+[ndbd default]
+NoOfReplicas=2
+DataMemory=80M
+IndexMemory=18M
+# TCP/IP options:
+[tcp default]
+portnumber=1186
+# Management process options:
+[ndb_mgmd]
+id=1
+hostname=123.58.251.111
+datadir=/var/lib/mysql-cluster
+# Options for data node
+[ndbd]
+id=2
+hostname=123.58.251.114
+datadir=/var/lib/mysql
+[ndbd]
+id=3
+hostname=123.58.251.115
+datadir=/var/lib/mysql
+[mysqld]
+id=4
+hostname=123.58.251.112
+[mysqld]
+id=5
+hostname=123.58.251.113
+
+
+（3）启动管理节点
+
+mkdir /var/lib/mysql-cluster
+ndb_mgmd -f /etc/mysql-cluster/config.ini        #### --initial (第一次启动加 --initial 修改了配置文件后的启动)
+
+ndb_mgm -e "SHOW"
+
+ndb_mgm -e shutdown
+
+
+
+4.数据节点（NDB1和NDB2）配置
+
+
+(1)安装数据节点
+
+cd /var/tmp/7.1.34-1
+rpm -ivh MySQL-Cluster-gpl-storage-7.1.34-1.el6.x86_64.rpm
+mkdir /var/lib/mysql
+
+
+(2)配置数据节点
+
+vim /etc/my.cnf
+i
+
+[mysqld]
+datadir=/var/lib/mysql
+socket=/var/lib/mysql/mysql.sock
+user=mysql
+# Disabling symbolic-links is recommended to prevent assorted security risks
+symbolic-links=0
+ 
+[mysqld_safe]
+log-error=/var/log/mysqld.log
+pid-file=/var/run/mysqld/mysqld.pid
+ 
+[mysql_cluster]
+ndb-connectstring=123.58.251.111
+
+
+（3）启动数据节点
+
+ndbd --initial       //NDB1
+
+ndbd --initial       //NDB2
+
+
+
+5.SQL节点（SQL1和SQL2）配置
+
+网卡及屏蔽ARP设置
+
+在现有网卡基础上添加一块lo:0网卡
+
+cat /etc/sysconfig/network-scripts/ifcfg-lo:0
+DEVICE=lo:0
+IPADDR=123.58.251.116
+NETMASK=255.255.255.255
+ONBOOT=yes
+NAME=lo:0
+
+vim /etc/sysctl.conf   
+net.ipv4.conf.all.arp_announce = 2   
+net.ipv4.conf.all.arp_ignore = 1   
+
+sysctl -p
+
+
+(1)安装SQL节点
+
+cd /var/tmp/7.1.34-1
+rpm -ivh MySQL-Cluster-gpl-client-7.1.34-1.el6.x86_64.rpm
+rpm -ivh MySQL-Cluster-gpl-server-7.1.34-1.el6.x86_64.rpm
+
+
+(2)配置SQL节点
+
+vim /etc/my.cnf
+i
+
+# The MySQL server
+[mysqld]
+port = 3306
+socket=/var/lib/mysql/mysql.sock
+ndbcluster
+default-storage-engine=NDBCLUSTER
+skip-name-resolve
+[mysql_cluster]
+ndb-connectstring=123.58.251.111
+
+
+（3）启动SQL节点
+
+service mysql start        //SQL1   
+Starting MySQL.. SUCCESS!
+    
+service mysql start        //SQL2，如无法启动，执行pkill -9 mysql再启动   
+Starting MySQL SUCCESS!    
+
+netstat -tupln |grep mysql
+
+
+（4）配置远程连接(SQL1和SQL2配置一致)
+
+mysql   
+grant all on *.* to 'duoyi'@'%' identified by '123456';   
+flush privileges;
+
+启动顺序一定要遵循：MGM → NDB → SQL
+
+
+
+
+
+五、查看状态
+
+
+
+1. 查看MGM状态
+
+ndb_mgm -e show
+Connected to Management Server at: localhost:1186
+Cluster Configuration
+---------------------
+[ndbd(NDB)]	2 node(s)
+id=2	@123.58.251.114  (mysql-5.1.73 ndb-7.1.34, Nodegroup: 0)
+id=3	@123.58.251.115  (mysql-5.1.73 ndb-7.1.34, Nodegroup: 0, *)
+
+[ndb_mgmd(MGM)]	1 node(s)
+id=1	@123.58.251.111  (mysql-5.1.73 ndb-7.1.34)
+
+[mysqld(API)]	2 node(s)
+id=4	@123.58.251.112  (mysql-5.1.73 ndb-7.1.34)
+id=5	@123.58.251.113  (mysql-5.1.73 ndb-7.1.34)
+
+
+
+2. 查看LB-Master状态
+
+service keepalived start   
+Starting keepalived:                                       [  OK  ]   
+
+ip addr
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN 
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+    inet 123.58.251.116/32 brd 123.58.251.116 scope global lo:0
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP qlen 1000
+    link/ether 00:50:56:96:63:08 brd ff:ff:ff:ff:ff:ff
+    inet 123.58.251.112/27 brd 123.58.251.127 scope global eth0
+    inet 123.58.251.116/27 scope global secondary eth0
+    inet6 fe80::250:56ff:fe96:6308/64 scope link 
+       valid_lft forever preferred_lft forever
+  
+ipvsadm
+IP Virtual Server version 1.2.1 (size=4096)
+Prot LocalAddress:Port Scheduler Flags
+  -> RemoteAddress:Port           Forward Weight ActiveConn InActConn
+TCP  123.58.251.116:mysql rr persistent 6
+  -> 123.58.251.112:mysql         Local   100    0          0         
+  -> 123.58.251.113:mysql         Route   100    0          3
+
+
+
+3. 查看LB-Backup状态
+
+service keepalived start   
+Starting keepalived:                                       [  OK  ]   
+
+ip addr   
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN 
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+    inet 123.58.251.116/32 brd 123.58.251.116 scope global lo:0
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP qlen 1000
+    link/ether 00:50:56:96:57:d9 brd ff:ff:ff:ff:ff:ff
+    inet 123.58.251.113/27 brd 123.58.251.127 scope global eth0
+    inet6 fe80::250:56ff:fe96:57d9/64 scope link 
+       valid_lft forever preferred_lft forever
+
+ipvsadm
+IP Virtual Server version 1.2.1 (size=4096)
+Prot LocalAddress:Port Scheduler Flags
+  -> RemoteAddress:Port           Forward Weight ActiveConn InActConn
+TCP  123.58.251.116:mysql rr persistent 6
+  -> 123.58.251.112:mysql         Route   100    0          3         
+  -> 123.58.251.113:mysql         Local   100    0          0
+
+
+
+
+
+六、测试
+
+
+
+1. 客户端1（CentOS6.5 64位，IP：117.79.235.75）
+
+yum install mysql   
+
+mysql -h 123.58.251.116 -uduoyi -p123456
+ 
+mysql> show databases;   
++--------------------+
+| Database           |
++--------------------+
+| information_schema |
+| mysql              |
+| ndbinfo            |
+| test               |
++--------------------+
+5 rows in set (0.01 sec)
+
+mysql> create database t;
+mysql> use t;
+mysql> create table t2(id int);
+mysql> insert into t2 values(10);  
+mysql> insert into t2 values(20);
+
+
+
+2. LB-Master查看连接状态
+
+ipvsadm
+IP Virtual Server version 1.2.1 (size=4096)
+Prot LocalAddress:Port Scheduler Flags
+  -> RemoteAddress:Port           Forward Weight ActiveConn InActConn
+TCP  123.58.251.116:mysql rr persistent 6
+  -> 123.58.251.112:mysql         Local   100    0          0         
+  -> 123.58.251.113:mysql         Route   100    1          3
+
+ipvsadm -lcn
+IPVS connection entries
+pro expire state       source             virtual            destination
+TCP 00:10  NONE        117.79.235.76:0    123.58.251.116:3306 123.58.251.113:3306
+TCP 14:37  ESTABLISHED 117.79.235.76:53420 123.58.251.116:3306 123.58.251.113:3306
+
+
+
+3. 客户端2（CentOS6.5 64位，IP：117.79.235.76）
+
+yum install mysql
+
+mysql -h 123.58.251.116 -uduoyi -p123456
+ 
+mysql> show databases;   
++--------------------+   
+| Database           |   
++--------------------+   
+| information_schema |   
+| mysql              |   
+| ndbinfo            |   
+| t                  |   
+| test               |   
++--------------------+   
+mysql> use t;   
+mysql> select * from t2;   
++------+   
+| id   |   
++------+   
+|   20 |   
+|   10 |   
++------+
+
+
+
+4. LB-Master查看连接状态
+
+ipvsadm -lcn
+IPVS connection entries
+pro expire state       source             virtual            destination
+TCP 14:43  ESTABLISHED 117.79.235.75:40822 123.58.251.116:3306 123.58.251.112:3306
+TCP 00:37  NONE        117.79.235.76:0    123.58.251.116:3306 123.58.251.113:3306
+TCP 13:04  ESTABLISHED 117.79.235.76:53420 123.58.251.116:3306 123.58.251.113:3306
+TCP 00:09  NONE        117.79.235.75:0    123.58.251.116:3306 123.58.251.112:3306
+
+总结：在客户端1上插入数据后，服务器显示客户端1连接的是SQL2(123.58.251.113),在客户端2上进行查询，能查询到客户端1输入的数据，服务器显示客户端2连接的是SQL1（123.58.251.112），所以，数据是同步的，并且是一致性的。
+
+
+
+
+
+
+

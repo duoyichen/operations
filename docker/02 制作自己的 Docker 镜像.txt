@@ -1,0 +1,103 @@
+制作自己的 Docker 镜像
+
+
+
+
+
+docker run -i -t centos /bin/bash
+
+rpm -qa|grep httpd
+[root@a083dbd040b4 /]# yum install -y httpd
+[root@a083dbd040b4 /]# rpm -qa|grep httpd
+httpd-tools-2.4.6-40.el7.centos.1.x86_64
+httpd-2.4.6-40.el7.centos.1.x86_64
+[root@a083dbd040b4 /]# touch TestDockerImage
+[root@a083dbd040b4 /]# ll
+total 28
+-rw-r--r--   1 root root     0 Jun  5 13:23 TestDockerImage
+-rw-r--r--   1 root root 18301 Jun  2 13:27 anaconda-post.log
+
+
+exit
+
+
+
+docker ps -a
+CONTAINER ID        IMAGE               COMMAND             CREATED             STATUS                      PORTS               NAMES
+a083dbd040b4        2a332da70fd1        "/bin/bash"         7 minutes ago       Exited (0) 27 seconds ago                       tiny_blackwell
+
+
+docker commit a083dbd040b4 10.10.33.11:5000/centos7me
+
+docker push 10.10.33.11:5000/centos7me
+
+http://10.10.33.11:5000/v1/search
+
+
+docker pull 10.10.33.11:5000/centos7me
+
+docker images
+REPOSITORY                   TAG                 IMAGE ID            CREATED             VIRTUAL SIZE
+10.10.33.11:5000/centos7me   latest              49c96e34eca7        9 minutes ago       310.9 MB
+10.10.33.11:5000/centos7     latest              2a332da70fd1        2 days ago          196.7 MB
+docker.io/centos             latest              a65193109361        2 days ago          196.7 MB
+
+docker run -i -t 10.10.33.11:5000/centos7me /bin/bash
+
+
+
+docker save 10.10.33.11:5000/centos7me > /tmp/centos7me.tar
+
+
+docker ps -a -q | xargs docker rm 可以删除所有未运行的容器
+
+docker rmi xxx
+
+docker images
+
+REPOSITORY                 TAG                 IMAGE ID            CREATED             VIRTUAL SIZE
+docker.io/centos           latest              a65193109361        2 days ago          196.7 MB
+10.10.33.11:5000/centos7   latest              2a332da70fd1        2 days ago          196.7 MB
+
+
+docker load < /tmp/centos7me.tar
+
+
+[root@compute1 ~]# docker load < /tmp/centos7me.tar
+[root@compute1 ~]# docker images
+REPOSITORY                   TAG                 IMAGE ID            CREATED             VIRTUAL SIZE
+10.10.33.11:5000/centos7me   latest              49c96e34eca7        59 minutes ago      310.9 MB
+10.10.33.11:5000/centos7     latest              2a332da70fd1        2 days ago          196.7 MB
+docker.io/centos             latest              a65193109361        2 days ago          196.7 MB
+
+
+
+
+
+
+
+
+
+cat >  Dockerfile <<eof
+# Version 0.0.1  
+From centos  
+MAINTAINER "wiselyman"  
+RUN yum -y update  
+RUN yum -y install httpd  
+EXPOSE 80
+systemctl start httpd
+eof
+
+
+docker build -t localhost:5000/centos_httpd - < Dockerfile
+
+docker images
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,294 @@
+
+
+yum -y install ntpdate
+ntpdate times.aliyun.com
+
+
+yum -y install cpan perl perl-FCGI perl-CGI perl-Digest-HMAC perl-Net-Telnet \
+perl-Net-OpenSSH perl-Net-SNMP perl-LDAP perl-Net-DNS perl-IO-Pty-Easy perl-Test-Simple \
+perl-Sys-Syslog perl-libwww-perl perl-IO-Socket-SSL perl-Socket6 perl-CGI-SpeedyCGI \
+perl-FCGI perl-Time-HiRes perl-ExtUtils-MakeMaker rrdtool rrdtool-perl curl fping \
+httpd httpd-devel gcc make wget libxml2-devel libpng-devel glib pango pango-devel freetype \
+freetype-devel fontconfig cairo cairo-devel libart_lgpl libart_lgpl-devel mod_fcgid screen \
+openssl openssl-devel popt-devel
+
+
+
+wget https://fossies.org/linux/misc/old/echoping-6.0.2.tar.gz
+
+tar xvfechoping-6.0.2.tar.gz
+cd echoping-6.0.2
+./configure --prefix=/usr/local/echoping --with-ssl --without-libidn
+make && make install
+
+
+wget https://oss.oetiker.ch/rrdtool/pub/rrdtool-1.5.6.tar.gz
+
+
+wget http://oss.oetiker.ch/smokeping/pub/smokeping-2.6.11.tar.gz
+tar -xvf smokeping-2.6.11.tar.gz
+cd smokeping-2.6.11
+ 
+export PERL5LIB=/usr/local/smokeping/thirdparty/lib/perl5/
+./setup/build-perl-modules.sh /usr/local/smokeping/thirdparty
+./configure --prefix=/usr/local/smokeping
+gmake install
+
+
+
+
+cd /usr/local/smokeping
+mkdir cache data var
+touch /var/log/smokeping.log
+chown apache.apache cache data var /var/log
+
+
+#fcgi文件
+cp /usr/local/smokeping/htdocs/smokeping.fcgi.dist /usr/local/smokeping/htdocs/smokeping.fcgi 
+#主配置文件
+cp /usr/local/smokeping/etc/config.dist /usr/local/smokeping/etc/config
+
+
+sed -i ‘s#cgiurl   = http://some.url/smokeping.cgi#cgiurl   = http://10.0.56.12/smokeping.cgi#g’/usr/local/smokeping/etc/config
+#指定检测的时间为60秒
+sed -i ‘s#step    = 300#step     = 60#g’/usr/local/smokeping/etc/config 
+#指定ping的次数为60
+sed -i ‘s#pings   =20#pings    =60#g’/usr/local/smokeping/etc/config
+
+
+
+vim /usr/local/smokeping/etc/config
+*** Presentation ***
+charset= utf-8
+ 
+yum -y install wqy-zenhei-fonts
+
+vim /usr/local/smokeping/lib/Smokeping/Graphs.pm
+        my$val = 0;
+        formy $host (@hosts){
+            my ($graphret,$xs,$ys) = RRDs::graph
+           ("dummy",
+           '--start', $tasks[0][1],
+           '--end', $tasks[0][2],
+            '--font TITLE:20"WenQuanYiZen Hei Mono"',
+           "DEF:maxping=$cfg->{General}{datadir}${host}.rrd:median:AVERAGE",
+           'PRINT:maxping:MAX:%le' );
+           my $ERROR = RRDs::error();
+
+
+htpasswd -c /usr/local/smokeping/htdocs/htpasswd smokeping
+chmod 600 /usr/local/smokeping/etc/smokeping_secrets.dist
+
+
+
+
+######### changed by duoyi 2017/10/25 ##############
+Alias /cache "/usr/local/smokeping/cache/"
+Alias /cropper "/usr/local/smokeping/htdocs/cropper/"
+Alias /smokeping "/usr/local/smokeping/htdocs/smokeping.fcgi"
+<Directory "/usr/local/smokeping">
+AllowOverride None
+Options All
+AddHandler cgi-script .fcgi .cgi
+AllowOverride AuthConfig
+Order allow,deny
+Allow from all
+AuthName "Smokeping"
+AuthType Basic
+AuthUserFile /usr/local/smokeping/htdocs/htpasswd
+Require valid-user
+DirectoryIndex smokeping.fcgi
+</Directory>
+
+
+
+
+
+*** Targets ***
+
+probe = FPing
+
+menu = Top
+title = Network Latency Grapher
+remark = Welcome to the SmokePing website of xxx Company. \
+         Here you will learn all about the latency of our network.
+
++ Test
+menu= Targets
+#parents = owner:/Test/James location:/
+
+++ Repos
+
+menu = Repos
+title = Repos
+alerts = someloss
+#slaves = boomer slave2
+host = 175.25.181.252
+
+++ Martin
+
+menu = Martin
+title = Martin
+host = 119.52.229.232
+
+++ MyHost
+
+menu = MyHost
+title = MyHost
+alerts = someloss
+host = 175.25.181.150
+
+
+
+/usr/local/smokeping/bin/smokeping --restart
+
+/usr/local/smokeping/bin/smokeping --reload
+
+pkill smokeping
+
+/usr/local/smokeping/bin/smokeping
+
+killall -9 smokeping
+/usr/local/smokeping/bin/smokeping --config=/usr/local/smokeping/etc/config --logfile=/usr/local/smokeping/var/smokeping.log
+
+
+
+echo "/usr/local/smokeping/bin/smokeping --config=/usr/local/smokeping/etc/config" >> /etc/rc.local
+
+systemctl disable firewalld
+
+
+
+vim /usr/local/smokeping/bin/smokeping
+use lib qw(/usr/local/rrdtool/lib/perl/5.16.3)
+
+
+
+
+
+
+
++ 三大运营商
+menu = 三大网络监控
+title = 监控统计
+++ dianxin
+menu = 电信网络监控
+title = 电信网络监控列表
+host = /Other/dianxin/dianxin-bj /Other/dianxin/dianxin-hlj /Other/dianxin/dianxin-tj /Other/dianxin/dianxin-sc /Other/dianxin/dianxin-sh /Other/dianxin/dianxin-gz
++++ dianxin-bj
+menu = 北京电信
+title = 北京电信
+alerts = someloss
+host = 202.96.199.133
+ 
++++ dianxin-hlj
+menu = 黑龙江电信
+title = 黑龙江电信
+alerts = someloss
+host = 219.147.198.242
+ 
++++ dianxin-tj
+menu = 天津电信
+title = 天津电信
+alerts = someloss
+host = 219.150.32.132
+ 
++++ dianxin-sc
+menu = 四川电信
+title = 四川电信
+alerts = someloss
+host = 61.139.2.69
+ 
++++ dianxin-sh
+menu = 上海电信
+title = 上海电信
+alerts = someloss
+host = 116.228.111.118
+ 
++++ dianxin-gz
+menu = 广东电信
+title = 广东电信
+alerts = someloss
+host = 113.111.211.22
+ 
+++ liantong
+menu = 联通网络监控
+title = 联通网络监控列表
+host = /Other/liantong/liantong-bj /Other/liantong/liantong-hlj /Other/liantong/liantong-tj  /Other/liantong/liantong-sc /Other/liantong/liantong-sh /Other/liantong/liantong-gz
+ 
++++ liantong-bj
+menu = 北京联通
+title = 北京联通
+alerts = someloss
+host = 61.135.169.121
+ 
++++ liantong-hlj
+menu = 黑龙江联通
+title = 黑龙江联通
+alerts = someloss
+host = 202.97.224.69
+ 
++++ liantong-tj
+menu = 天津联通
+title = 天津联通
+alerts = someloss
+host = 202.99.96.68
+ 
++++ liantong-sc
+menu = 四川联通
+title = 四川联通
+alerts = someloss
+host = 119.6.6.6
+ 
++++ liantong-sh
+menu = 上海联通
+title = 上海联通
+alerts = someloss
+host = 210.22.84.3
+ 
++++ liantong-gz
+menu = 广东联通
+title = 广东联通
+alerts = someloss
+host = 221.5.88.88
+ 
+++ yidong
+menu = 移动网络监控
+title = 移动网络监控列表
+host = /Other/yidong/yidong-bj /Other/yidong/yidong-hlj /Other/yidong/yidong-tj /Other/yidong/yidong-sc  /Other/yidong/yidong-sh /Other/yidong/yidong-gz
+ 
++++ yidong-bj
+menu = 北京移动
+title = 北京移动
+alerts = someloss
+host = 221.130.33.52
+ 
++++ yidong-hlj
+menu = 黑龙江移动
+title = 黑龙江移动
+alerts = someloss
+host = 211.137.241.35
+ 
++++ yidong-tj
+menu = 天津移动
+title = 天津移动
+alerts = someloss
+host = 211.137.160.5
+ 
++++ yidong-sc
+menu = 四川移动
+title = 四川移动
+alerts = someloss
+host = 218.201.4.3
+ 
++++ yidong-sh
+menu = 上海移动
+title = 上海移动
+alerts = someloss
+host = 117.131.19.23
+ 
++++ yidong-gz
+menu = 广东移动
+title = 广东移动
+alerts = someloss
+host = 211.136.192.6

@@ -1,0 +1,86 @@
+centos-master = 192.168.121.9
+centos-minion = 192.168.121.65
+
+
+
+
+
+
+
+
+
+cat > /etc/yum.repos.d/docker.repo <<eof
+[virt7-docker-common-release]
+name=virt7-docker-common-release
+baseurl=http://cbs.centos.org/repos/virt7-docker-common-release/x86_64/os/
+gpgcheck=0
+eof
+
+
+yum -y install --enablerepo=virt7-docker-common-release kubernetes
+
+
+
+
+KUBE_ETCD_SERVERS="--etcd-servers=http://10.10.33.11:2379"
+
+
+
+
+
+for SERVICES in etcd kube-apiserver kube-controller-manager kube-scheduler; \
+do systemctl restart $SERVICES;systemctl enable $SERVICES;\
+systemctl status $SERVICES;done
+
+
+
+for SERVICES in etcd kube-apiserver kube-controller-manager kube-scheduler; \
+do systemctl status $SERVICES;done
+
+
+
+
+
+
+
+
+cat > pod-nginx.yaml << eof
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+spec:
+  containers:
+  - name: nginx
+    image: nginx:1.7.9
+    ports:
+    - containerPort: 80
+eof
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

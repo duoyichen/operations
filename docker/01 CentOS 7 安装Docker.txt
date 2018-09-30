@@ -1,0 +1,109 @@
+CentOS 7安装Docker及常用命令
+
+
+
+
+
+博客分类： docker
+ 
+yum install docker #安装docker
+
+systemctl start docker.service #启动docker
+
+systemctl enable docker.service #docker开机启动
+ 
+docker -v #查看docker版本
+ 
+docker info #查看docker具体信息
+
+docker pull centos #下载centos image
+
+docker images #显示已有image
+
+docker rmi  imageid #删除image
+
+sudo usermod -a -G docker wisely #非root用户使用
+
+docker run -i -t centos /bin/bash #启动系统
+
+docker stop $(docker ps -a -q) #停止所有容器
+ 
+docker rm $(docker ps -a -q) #删除所有container
+ 
+docker rmi $(docker images -q) #删除所有image
+ 
+docker inspect container_name #查看容器信息
+ 
+docker inspect container_name | grep IPAddress #查看当前容器ip地地址
+ 
+docker attach --sig-proxy=false 304f5db405ec  (按control +c 退出不停止容器)
+
+
+docker search centos7
+
+
+docker images tree
+
+
+docker run centos /bin/echo hello world
+
+
+docker ps ：列出当前所有正在运行的container
+    docker ps -l ：列出最近一次启动的container
+    docker ps -a ：列出所有的container（包含历史，即运行过的container）
+    docker ps -q ：列出最近一次运行的container ID
+
+
+
+docker start/stop/restart <container> ：开启/停止/重启container
+    docker start [container_id] ：再次运行某个container （包括历史container）
+    docker attach [container_id] ：连接一个正在运行的container实例（即实例必须为start状态，可以多个窗口同时attach 一个container实例）
+    docker start -i <container> ：启动一个container并进入交互模式（相当于先start，在attach）
+    docker run -i -t <image> /bin/bash ：使用image创建container并进入交互模式, login shell是/bin/bash
+    docker run -i -t -p <host_port:contain_port> ：映射 HOST 端口到容器，方便外部访问容器内服务，host_port 可以省略，省略表示把 container_port 映射到一个动态端口。
+    注：使用start是启动已经创建过得container，使用run则通过image开启一个新的container。
+
+
+
+sudo Docker ps查看正在运行的容器的id等信息
+”sudo docker inspect 容器id“可以查看到容器的相关信息
+“docker inspect --format '{{ .NetworkSettings.IPAddress }}' 容器id”可以查看容器的具体IP地址，如果输出是空的说明没有配置IP地址
+
+
+
+
+docker commit <container> [repo:tag] 将一个container固化为一个新的image，后面的repo:tag可选。
+
+
+
+docker ps
+CONTAINER ID        IMAGE               COMMAND             CREATED             STATUS              PORTS               NAMES
+350aaf4f4cad        centos              "/bin/bash"         17 minutes ago      Up 17 minutes                           thirsty_leavitt
+
+docker images
+REPOSITORY          TAG                 IMAGE ID            CREATED             VIRTUAL SIZE
+docker.io/centos    latest              2a332da70fd1        39 hours ago        196.7 MB
+
+
+#docker attach 350aaf4f4cad
+
+
+[root@350aaf4f4cad ~]# touch DockerTest
+[root@350aaf4f4cad ~]# ll
+total 4
+-rw-r--r-- 1 root root    0 Jun  4 11:53 DockerTest
+-rw------- 1 root root 2874 Jun  2 13:27 anaconda-ks.cfg
+
+docker commit 350aaf4f4cad docker.io/centos
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,814 @@
+
+
+各组件版本如下：
+
+Kubernetes-1.03
+docker-1.8.2
+flannel-0.5.3
+etcd-2.1.1
+
+Kubernetes部署环境角色如下：
+CentOS 7.2 64位系统，3台虚拟机：
+master：10.10.33.11
+minion1:10.10.33.31
+minion2:10.10.33.32
+
+
+
+
+
+1. 预处理
+
+每台机器禁用iptables 避免和docker 的iptables冲突：
+
+systemctl stop firewalld
+systemctl disable firewalld
+禁用selinux：
+vim /etc/selinux/config
+#SELINUX=enforcing
+SELINUX=disabled
+
+
+
+
+在2个minions机器安装docker：
+yum -y install docker
+yum -y update
+reboot
+CentOS系统，使用devicemapper作为存储后端，初始安装docker 会使用loopback, 导致docker启动报错，需要update之后再启动。
+
+Docker启动脚本更新
+
+vim /etc/sysconfig/docker
+添加：-H tcp://0.0.0.0:2375，最终配置如下，以便以后提供远程API维护:
+
+#OPTIONS=--selinux-enabled -H tcp://0.0.0.0:2375 -H fd://
+提前说明一下，kubernetes运行pods时需要连带运行一个叫pause的镜像，需要先从docker.io上下载此镜像，然后用docker命令改名字：
+
+docker pull docker.io/kubernetes/pause
+docker tag kubernetes/pause gcr.io/google_containers/pause:0.8.0
+docker tag gcr.io/google_containers/pause:0.8.0 gcr.io/google_containers/pause
+
+
+
+
+
+2. master结点的安装与配置
+
+安装etcd与kubernetes-master：
+
+yum -y install etcd kubernetes-master
+
+修改etcd配置文件：
+
+egrep -v "^#" /etc/etcd/etcd.conf
+
+ETCD_NAME=default
+ETCD_DATA_DIR="/var/lib/etcd/default.etcd"
+ETCD_LISTEN_CLIENT_URLS="http://0.0.0.0:2379"
+ETCD_ADVERTISE_CLIENT_URLS="http://10.10.33.11:2379"
+
+修改kube-master配置文件：
+
+egrep -v "^#|^$" /etc/kubernetes/apiserver
+
+KUBE_API_ADDRESS="--address=0.0.0.0"
+KUBE_ETCD_SERVERS="--etcd_servers=http://10.10.33.11:2379"
+KUBE_SERVICE_ADDRESSES="--service-cluster-ip-range=10.254.0.0/16"
+KUBE_ADMISSION_CONTROL="--admission_control=NamespaceLifecycle,NamespaceExists,LimitRanger,SecurityContextDeny,ServiceAccount,ResourceQuota"
+KUBE_API_ARGS=""
+
+egrep -v "^#|^$" /etc/kubernetes/controller-manager
+
+KUBE_CONTROLLER_MANAGER_ARGS="--node-monitor-grace-period=10s --pod-eviction-timeout=10s"
+
+
+egrep -v "^#|^$" /etc/kubernetes/config
+
+KUBE_LOGTOSTDERR="--logtostderr=true"
+KUBE_LOG_LEVEL="--v=0"
+KUBE_ALLOW_PRIV="--allow_privileged=false"
+KUBE_MASTER="--master=http://10.10.33.11:8080"
+
+启动服务：
+systemctl enable etcd kube-apiserver kube-scheduler kube-controller-manager
+systemctl restart etcd kube-apiserver kube-scheduler kube-controller-manager
+
+systemctl status etcd kube-apiserver kube-scheduler kube-controller-manager
+
+
+etcdctl mk /coreos.com/network/config '{"Network":"172.17.0.0/16"}'
+
+
+
+3. minion结点的安装与配置
+
+
+yum -y install kubernetes-node flannel
+
+修改kube-node和flannel配置文件：
+
+egrep -v "^#|^$" /etc/kubernetes/config
+
+KUBE_LOGTOSTDERR="--logtostderr=true"
+KUBE_LOG_LEVEL="--v=0"
+KUBE_ALLOW_PRIV="--allow_privileged=false"
+KUBE_MASTER="--master=http://10.10.33.11:8080"
+
+egrep -v "^#|^$" /etc/kubernetes/kubelet
+
+KUBELET_ADDRESS="--address=127.0.0.1"
+KUBELET_HOSTNAME="--hostname_override=10.10.33.31"
+KUBELET_API_SERVER="--api_servers=http://10.10.33.11:8080"
+KUBELET_ARGS="--pod-infra-container-image=kubernetes/pause"
+
+为etcd服务配置flannel，修改配置文件 cat /etc/sysconfig/flanneld
+
+FLANNEL_ETCD="http://10.10.33.11:2379"
+FLANNEL_ETCD_KEY="/coreos.com/network"
+
+启动服务：
+systemctl enable flanneld.service kubelet kube-proxy
+systemctl restart flanneld.service docker
+systemctl start kubelet kube-proxy
+
+systemctl stop iptables-services firewalld
+
+
+systemctl status docker kubelet kube-proxy
+
+systemctl restart docker kubelet kube-proxy
+
+
+
+
+
+在每个minions可以看到2块网卡：docker0和flannel0，这2块网卡的ip在不同的机器ip地址不同：
+#minion1
+4: flannel0: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> mtu 1472 qdisc pfifo_fast state UNKNOWN qlen 500
+    link/none 
+    inet 172.17.98.0/16 scope global flannel0
+       valid_lft forever preferred_lft forever
+5: docker0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc noqueue state DOWN 
+    link/ether 02:42:9a:01:ca:99 brd ff:ff:ff:ff:ff:ff
+    inet 172.17.98.1/24 scope global docker0
+       valid_lft forever preferred_lft forever
+
+#minion2
+4: flannel0: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> mtu 1472 qdisc pfifo_fast state UNKNOWN qlen 500
+    link/none 
+    inet 172.17.67.0/16 scope global flannel0
+       valid_lft forever preferred_lft forever
+5: docker0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc noqueue state DOWN 
+    link/ether 02:42:25:be:ba:64 brd ff:ff:ff:ff:ff:ff
+    inet 172.17.67.1/24 scope global docker0
+       valid_lft forever preferred_lft forever
+
+
+
+
+
+4. 检查状态
+登陆master，确认minions的状态：
+
+kubectl get nodes
+NAME          STATUS     AGE
+10.10.33.31   NotReady   12h
+10.10.33.32   NotReady   12h
+
+
+
+
+
+
+
+
+
+
+
+1. 部署nginx pod 和复制器
+
+cat > nginx-rc.yaml <<eof
+apiVersion: v1 
+kind: ReplicationController 
+metadata: 
+  name: nginx-controller 
+spec: 
+  replicas: 2 
+  selector: 
+    name: nginx 
+  template: 
+    metadata: 
+      labels: 
+        name: nginx 
+    spec: 
+      containers: 
+        - name: nginx 
+          image: nginx 
+          ports: 
+            - containerPort: 80
+eof
+
+
+我们定义了一个nginx pod复制器，复制份数为2，我们使用nginx docker镜像。
+
+执行下面的操作创建nginx pod复制器:
+
+[root@master test]# kubectl create -f nginx-rc.yaml 
+replicationcontrollers/nginx-controller
+记得先去下载gcr.io镜像，然后改名，否则会提示失败。由于还会下载nginx镜像，所以所创建的Pod需要等待一些时间才能处于running状态。
+[root@master test]# kubectl get pods
+NAME                     READY     STATUS    RESTARTS   AGE
+nginx                    1/1       Running   0          1d
+nginx-controller-dkl3v   1/1       Running   0          14s
+nginx-controller-hxcq8   1/1       Running   0          14s
+我们可以使用describe 命令查看pod的相关信息:
+
+[root@master test]# kubectl describe pod nginx-controller-dkl3v
+Name:				nginx-controller-dkl3v
+Namespace:			default
+Image(s):			nginx
+Node:				192.168.32.17/192.168.32.17
+Labels:				name=nginx
+Status:				Running
+Reason:				
+Message:			
+IP:				172.17.67.2
+Replication Controllers:	nginx-controller (2/2 replicas created)
+Containers:
+  nginx:
+    Image:		nginx
+    State:		Running
+      Started:		Wed, 30 Dec 2015 02:03:19 -0500
+    Ready:		True
+    Restart Count:	0
+Conditions:
+  Type		Status
+  Ready 	True 
+Events:
+  FirstSeen				LastSeen			Count	From			SubobjectPath			Reason		Message
+  Wed, 30 Dec 2015 02:03:14 -0500	Wed, 30 Dec 2015 02:03:14 -0500	1	{scheduler }						scheduled	Successfully assigned nginx-controller-dkl3v to 192.168.32.17
+  Wed, 30 Dec 2015 02:03:15 -0500	Wed, 30 Dec 2015 02:03:15 -0500	1	{kubelet 192.168.32.17}	implicitly required container POD	pulled		Pod container image "kubernetes/pause" already present on machine
+  Wed, 30 Dec 2015 02:03:16 -0500	Wed, 30 Dec 2015 02:03:16 -0500	1	{kubelet 192.168.32.17}	implicitly required container POD	created		Created with docker id e88dffe46a28
+  Wed, 30 Dec 2015 02:03:17 -0500	Wed, 30 Dec 2015 02:03:17 -0500	1	{kubelet 192.168.32.17}	implicitly required container POD	started		Started with docker id e88dffe46a28
+  Wed, 30 Dec 2015 02:03:18 -0500	Wed, 30 Dec 2015 02:03:18 -0500	1	{kubelet 192.168.32.17}	spec.containers{nginx}		created		Created with docker id 25fcb6b4ce09
+  Wed, 30 Dec 2015 02:03:19 -0500	Wed, 30 Dec 2015 02:03:19 -0500	1	{kubelet 192.168.32.17}	spec.containers{nginx}		started		Started with docker id 25fcb6b4ce09
+
+
+2. 部署节点内部可访问的nginx service
+
+Service的type有ClusterIP和NodePort之分，缺省是ClusterIP，这种类型的Service只能在集群内部访问。配置文件如下：
+
+cat > nginx-service-clusterip.yaml << eof
+apiVersion: v1 
+kind: Service 
+metadata: 
+  name: nginx-service-clusterip 
+spec: 
+  ports: 
+    - port: 8001 
+      targetPort: 80 
+      protocol: TCP 
+  selector: 
+    name: nginx
+eof
+
+执行下面的命令创建service:
+
+kubectl create -f ./nginx-service-clusterip.yaml
+service "nginx-service-clusterip" created
+
+kubectl get service
+NAME                      CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+kubernetes                10.254.0.1      <none>        443/TCP    13h
+nginx-service-clusterip   10.254.203.73   <none>        8001/TCP   16s
+
+
+上面的输出告诉我们这个 Service的Cluster IP是10.254.203.73，端口是8001。下面我们验证这个PortalNet IP的工作情况：
+在192.168.32.16上执行以下命令：
+
+[root@minion1 ~]# curl -s 10.254.203.73:8001
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+<h1>Welcome to nginx!</h1>
+<p>If you see this page, the nginx web server is successfully installed and
+working. Further configuration is required.</p>
+
+<p>For online documentation and support please refer to
+<a href="http://nginx.org/">nginx.org</a>.<br/>
+Commercial support is available at
+<a href="http://nginx.com/">nginx.com</a>.</p>
+
+<p><em>Thank you for using nginx.</em></p>
+</body>
+</html>
+
+从前面部署复制器的部分我们知道nginx Pod运行在17节点上。上面我们特意从16代理节点上访问我们的服务来体现Service Cluster IP在所有集群代理节点的可到达性。
+
+
+
+3. 部署外部可访问的nginx service
+
+下面我们创建NodePort类型的Service，这种类型的Service在集群外部是可以访问。配置文件如下：
+
+cat nginx-service-nodeport.yaml 
+apiVersion: v1 
+kind: Service 
+metadata: 
+  name: nginx-service-nodeport 
+spec: 
+  ports: 
+    - port: 8000
+      targetPort: 80 
+      protocol: TCP 
+  type: NodePort
+  selector: 
+    name: nginx
+
+执行如下命令创建service并进行查看：
+[root@master test]# kubectl create -f ./nginx-service-nodeport.yaml 
+You have exposed your service on an external port on all nodes in your
+cluster.  If you want to expose this service to the external internet, you may
+need to set up firewall rules for the service port(s) (tcp:31000) to serve traffic.
+
+See http://releases.k8s.io/HEAD/docs/user-guide/services-firewalls.md for more details.
+services/nginx-service-nodeport
+
+[root@master test]# kubectl get service
+NAME                      LABELS                                    SELECTOR     IP(S)            PORT(S)
+kubernetes                component=apiserver,provider=kubernetes   <none>       10.254.0.1       443/TCP
+nginx-service-clusterip   <none>                                    name=nginx   10.254.234.255   8001/TCP
+nginx-service-nodeport    <none>                                    name=nginx   10.254.210.68    8000/TCP
+创建service时提示需要设置firewall rules，不用去管，不影响后续操作。
+查看创建的service：
+
+[root@master test]# kubectl describe service nginx-service-nodeport
+Name:			nginx-service-nodeport
+Namespace:		default
+Labels:			<none>
+Selector:		name=nginx
+Type:			NodePort
+IP:			10.254.210.68
+Port:			<unnamed>	8000/TCP
+NodePort:		<unnamed>	31000/TCP
+Endpoints:		172.17.67.2:80,172.17.67.3:80
+Session Affinity:	None
+No events.
+这个 Service的节点级别端口是31000。下面我们验证这个 Service的工作情况：
+[root@master test]# curl -s 192.168.32.16:31000
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+<h1>Welcome to nginx!</h1>
+<p>If you see this page, the nginx web server is successfully installed and
+working. Further configuration is required.</p>
+
+<p>For online documentation and support please refer to
+<a href="http://nginx.org/">nginx.org</a>.<br/>
+Commercial support is available at
+<a href="http://nginx.com/">nginx.com</a>.</p>
+
+<p><em>Thank you for using nginx.</em></p>
+</body>
+</html>
+
+[root@master test]# curl -s 192.168.32.17:31000
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+<h1>Welcome to nginx!</h1>
+<p>If you see this page, the nginx web server is successfully installed and
+working. Further configuration is required.</p>
+
+<p>For online documentation and support please refer to
+<a href="http://nginx.org/">nginx.org</a>.<br/>
+Commercial support is available at
+<a href="http://nginx.com/">nginx.com</a>.</p>
+
+<p><em>Thank you for using nginx.</em></p>
+</body>
+</html>
+不管是从16还是17，都能访问到我们的服务。
+4. 总结
+
+本文只是一个简单的应用，在应用部署时，了解Kubernetes的应用模型是非常重要的。还需要对Kubernetes进行更深入的研究。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+centos7 yum安装kubernetes 1.1
+2015-11-26 15:23:51
+标签：docker kubernetes
+原创作品，允许转载，转载时请务必以超链接形式标明文章 原始出处 、作者信息和本声明。否则将追究法律责任。http://foxhound.blog.51cto.com/1167932/1717105
+前提：centos7 已经update
+yum update -y
+
+一、创建yum源 master，slave都要
+kubernetes release 版本 yum源
+http://cbs.centos.org/repos/virt7-docker-common-release/x86_64/os/Packages/
+
+vi  virt7-docker-common-release.repo
+1
+2
+3
+4
+[virt7-docker-common-release]
+name=virt7-docker-common-release
+baseurl=http://cbs.centos.org/repos/virt7-docker-common-release/x86_64/os/
+gpgcheck=0
+
+二、yum 安装服务
+yum -y install --enablerepo=virt7-docker-common-release kubernetes etcd 
+
+三、将主机名添加到master,slave的/etc/hosts里，如果主机名有dns解析就不需要添加
+1
+2
+3
+echo "192.168.5.221 k8s_master
+192.168.5.222 k8s_slave1
+192.168.5.237 k8s_slave2" >> /etc/hosts
+
+四、修改/etc/kubernetes/config(所有节点)
+1
+2
+3
+4
+5
+6
+7
+8
+# logging to stderr means we get it in the systemd journal
+KUBE_LOGTOSTDERR="--logtostderr=true"
+# journal message level, 0 is debug
+KUBE_LOG_LEVEL="--v=0"
+# Should this cluster be allowed to run privileged docker containers
+KUBE_ALLOW_PRIV="--allow-privileged=false"
+# How the controller-manager, scheduler, and proxy find the apiserver
+KUBE_MASTER="--master=http://192.168.5.221:8080"
+
+五、禁用防火墙
+1
+2
+systemctl disable iptables-services firewalld
+systemctl stop iptables-services firewalld
+
+六、在master节点配置kubernetes服务
+修改配置文件/etc/etcd/etcd.conf,确保etcd监听所有地址，修改如下：
+1
+2
+3
+ETCD_NAME=default
+ETCD_DATA_DIR="/var/lib/etcd/default.etcd"
+ETCD_LISTEN_CLIENT_URLS="http://0.0.0.0:2379"
+
+修改配置文件/etc/kubernetes/apiserver,修改如下：
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+###
+# kubernetes system config
+#
+# The following values are used to configure the kube-apiserver
+#
+# The address on the local server to listen to.
+KUBE_API_ADDRESS="--address=0.0.0.0"
+# The port on the local server to listen on.
+KUBE_API_PORT="--port=8080"
+# Port minions listen on
+KUBELET_PORT="--kubelet-port=10250"
+# Comma separated list of nodes in the etcd cluster
+KUBE_ETCD_SERVERS="--etcd-servers=http://127.0.0.1:2379"
+# Address range to use for services
+KUBE_SERVICE_ADDRESSES="--service-cluster-ip-range=10.254.0.0/16"
+# default admission control policies
+KUBE_ADMISSION_CONTROL="--admission-control=NamespaceLifecycle,NamespaceExists,LimitRanger,ResourceQuota"
+# Add your own!
+KUBE_API_ARGS=""
+
+修改配置文件/etc/kubernetes/controller-manager，定义minions ip地址
+1
+KUBELET_ADDRESSES="--machines=192.168.5.222,192.168.5.223"
+
+启动服务
+1
+2
+3
+4
+5
+for SERVICES in etcd kube-apiserver kube-controller-manager kube-scheduler; do 
+    systemctl restart $SERVICES
+    systemctl enable $SERVICES
+    systemctl status $SERVICES 
+done
+
+注意：1.1开始会自动加入证书认证，程序会自动生成证书文件，需要检查目录的属主属组
+1
+2
+3
+4
+5
+[root@k8s_master kubernetes]# pwd
+/var/run/kubernetes
+[root@k8s_master kubernetes]# ll
+-rw-r--r-- 1 kube kube 1200 Nov 20 15:16 apiserver.crt
+-rw------- 1 kube kube 1679 Nov 20 15:16 apiserver.key
+
+重启服务
+1
+2
+3
+4
+for SERVICES in etcd kube-apiserver kube-controller-manager kube-scheduler; do 
+    systemctl restart $SERVICES
+    systemctl status $SERVICES 
+done
+
+
+minions 节点配置
+#单独安装docker 1.7
+1
+2
+3
+yum install docker-1.7.1* docker-selinux-1.7.1
+systemctl enable docker-storage-setup.service
+systemctl enable docker.service
+
+#yum 安装kubernetes flannel
+1
+yum -y install --enablerepo=virt7-docker-common-release kubernetes flannel
+
+#创建docker-pool
+1
+docker-storage-setup
+
+#为etcd服务配置flannel，修改配置文件 /etc/sysconfig/flanneld
+1
+FLANNEL_ETCD="http://192.168.5.221:2379"
+
+#修改kubernetes配置文件，指定master。/etc/kubernetes/config
+1
+2
+# How the controller-manager, scheduler, and proxy find the apiserver
+KUBE_MASTER="--master=http://192.168.5.221:8080"
+
+#配置kubelet服务。/etc/kubernetes/kubelet
+1
+2
+3
+4
+5
+6
+7
+8
+# The address for the info server to serve on (set to 0.0.0.0 or "" for all interfaces)
+KUBELET_ADDRESS="--address=0.0.0.0"
+# The port for the info server to serve on
+KUBELET_PORT="--port=10250"
+# You may leave this blank to use the actual hostname
+KUBELET_HOSTNAME="--hostname-override=192.168.5.237"
+# location of the api-server
+KUBELET_API_SERVER="--api-servers=http://192.168.5.221:8080"
+
+#启动服务
+1
+2
+3
+4
+5
+for SERVICES in kube-proxy kubelet docker flanneld; do 
+    systemctl restart $SERVICES
+    systemctl enable $SERVICES
+    systemctl status $SERVICES 
+done
+
+如果报错Bridge ip (...) does not match existing bridge configuration，是因为docker的bridge 先于flannel启动导致冲突
+删除docker 0 
+1
+2
+ip link set dev docker0 down
+brctl delbr docker0
+
+vi /usr/lib/systemd/system/docker.service 修改如下：
+1
+2
+3
+4
+5
+6
+7
+8
+[Unit]
+Description=Docker Application Container Engine
+Documentation=http://docs.docker.com
+After=flanneld.service
+Wants=docker-storage-setup.service
+Requires=flanneld.service
+ 
+systemctl restart docker
+
+#验证
+#在每个minions可以看到2块网卡：docker0和flannel0，这2块网卡的ip在不同的机器ip地址不同。但是同机器的2块网卡ip相同
+1
+2
+3
+ip a | grep -E "flannel|docker"|grep inet
+    inet 172.17.58.0/16 scope global flannel0
+    inet 172.17.58.1/24 scope global docker0
+
+#现在登陆master，确认minions的状态
+1
+2
+3
+4
+[root@k8s_master etcd]#  kubectl get nodes
+NAME            LABELS                                 STATUS    AGE
+192.168.5.222   kubernetes.io/hostname=192.168.5.222   Ready     1d
+192.168.5.237   kubernetes.io/hostname=192.168.5.237   Ready     2d
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+etcd
+
+flannel
+
+kube-apiserver
+
+kube-controller-manager
+
+kube-scheduler
+
+kubelet
+
+kube-proxy
+
+
+
+
+
+
+systemctl stop firewalld
+systemctl disable firewalld
+
+
+
+
+
+
+
+
+
+
+
+
+
+yum -y install wget ntpdate bind-utils epel-release
+
+
+
+
+systemctl stop firewalld.service #停止firewall
+    # systemctl disable firewalld.service
+
+
+
+
+yum install iptables-services #安装
+    # systemctl start iptables.service #最后重启防火墙使配置生效
+    # systemctl enable iptables.service
+
+
+
+
+
+
+
+
+
+
+安装Etcd（192.168.1.10主机）
+    
+引用
+
+    # mkdir -p /home/install && cd /home/install  
+    # wget https://github.com/coreos/etcd/releases/download/v0.4.6/etcd-v0.4.6-linux-amd64.tar.gz  
+    # tar -zxvf etcd-v0.4.6-linux-amd64.tar.gz  
+    # cd etcd-v0.4.6-linux-amd64  
+    # cp etcd* /bin/  
+    # /bin/etcd -version  
+    etcd version 0.4.6  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

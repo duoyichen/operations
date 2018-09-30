@@ -1,0 +1,167 @@
+
+
+
+
+
+
+Swarm primary and secondary managers	manager0, manager1
+Swarm node	node0, node1
+Discovery backend	consul0
+
+
+
+
+
+
+sudo yum update -y
+reboot
+
+curl -sSL https://get.docker.com/ | sh
+
+sudo docker daemon -H tcp://0.0.0.0:2375 -H unix:///var/run/docker.sock
+
+不要关闭docker daemon
+
+
+sudo docker run hello-world
+
+
+
+
+
+在manager0 和 consul0 上
+docker run -d -p 8500:8500 --name=consul progrium/consul -server -bootstrap
+
+
+
+
+
+manager0
+docker run -d -p 4000:4000 swarm manage -H :4000 --replication --advertise 10.10.33.11:4000 consul://10.10.33.34:8500
+
+manager1
+docker run -d -p 4000:4000 swarm manage -H :4000 --replication --advertise 10.10.33.31:4000 consul://10.10.33.34:8500
+
+
+
+
+
+node0
+docker run -d swarm join --advertise=10.10.33.32:2375 consul://10.10.33.34:8500
+
+node1
+docker run -d swarm join --advertise=10.10.33.33:2375 consul://10.10.33.34:8500
+
+
+
+
+
+docker -H :4000 info
+
+[root@controller ~]# docker -H :4000 info
+Containers: 2
+ Running: 2
+ Paused: 0
+ Stopped: 0
+Images: 2
+Server Version: swarm/1.2.3
+Role: replica
+Primary: 10.10.33.31:4000
+Strategy: spread
+Filters: health, port, containerslots, dependency, affinity, constraint
+Nodes: 2
+ compute2: 10.10.33.32:2375
+  ?.ID: J5BK:LE4D:Z25C:TLBZ:FGYZ:NPEE:OXKS:JZOK:2GDO:FKRC:VH2E:GFJC
+  ?.Status: Healthy
+  ?.Containers: 1
+  ?.Reserved CPUs: 0 / 8
+  ?.Reserved Memory: 0 B / 3.872 GiB
+  ?.Labels: executiondriver=, kernelversion=3.10.0-327.18.2.el7.x86_64, operatingsystem=CentOS Linux 7 (Core), storagedriver=devicemapper
+  ?.UpdatedAt: 2016-06-07T12:25:33Z
+  ?.ServerVersion: 1.11.2
+ compute3: 10.10.33.33:2375
+  ?.ID: HKVF:SZ73:53TG:PCPL:TBJB:FPXS:6374:TNHE:Y5MY:RFIZ:IJK3:PSKC
+  ?.Status: Healthy
+  ?.Containers: 1
+  ?.Reserved CPUs: 0 / 8
+  ?.Reserved Memory: 0 B / 3.872 GiB
+  ?.Labels: executiondriver=, kernelversion=3.10.0-327.18.2.el7.x86_64, operatingsystem=CentOS Linux 7 (Core), storagedriver=devicemapper
+  ?.UpdatedAt: 2016-06-07T12:25:29Z
+  ?.ServerVersion: 1.11.2
+Plugins: 
+ Volume: 
+ Network: 
+Kernel Version: 3.10.0-327.18.2.el7.x86_64
+Operating System: linux
+Architecture: amd64
+CPUs: 16
+Total Memory: 7.744 GiB
+Name: a369d0b67f2f
+Docker Root Dir: 
+Debug mode (client): false
+Debug mode (server): false
+WARNING: No kernel memory limit support
+
+
+
+docker -H :4000 run hello-world
+
+docker -H :4000 ps
+
+
+
+
+登陆 manager0 
+
+docker ps
+
+docker rm -f <id_name>
+
+再启动
+docker run -d -p 4000:4000 swarm manage -H :4000 --replication --advertise 10.10.33.11:4000 consul://10.10.33.34:8500
+
+sudo docker logs <id_name>
+
+docker -H :4000 info
+
+
+
+
+
+
+在集群上运行容器并查看
+
+
+[root@controller ~]# docker -H 10.10.33.11:4000 run -d --name web1 nginx
+398fc3d1a0cba833d37d9f7e180fb028b4cc085af53b0c3e0114659bcd08cf30
+
+[root@controller ~]# docker -H 10.10.33.11:4000 ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS               NAMES
+398fc3d1a0cb        nginx               "nginx -g 'daemon off"   16 seconds ago      Up 14 seconds       80/tcp, 443/tcp     compute2/web1
+ad2523852e1c        centos              "/bin/bash"              31 minutes ago      Up 31 minutes                           compute3/lonely_jepsen
+
+[root@controller ~]# docker -H :4000 run -d --name web2 nginx
+a7a017ad5dc2d5529ffba93e8d38c354436c9084d5548e559cf6409e03bd8572
+
+[root@controller ~]# docker -H :4000 ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS               NAMES
+a7a017ad5dc2        nginx               "nginx -g 'daemon off"   17 seconds ago      Up 16 seconds       80/tcp, 443/tcp     compute3/web2
+398fc3d1a0cb        nginx               "nginx -g 'daemon off"   8 minutes ago       Up 8 minutes        80/tcp, 443/tcp     compute2/web1
+ad2523852e1c        centos              "/bin/bash"              39 minutes ago      Up 39 minutes                           compute3/lonely_jepsen
+
+[root@controller ~]# docker -H :4000 run -d --name web3 nginx
+b366e3aacae6174cf95fe5d783e9bc48c9e8b60b0d940b6d401390ae5fae0202
+
+[root@controller ~]# docker -H :4000 run -d --name web4 nginx
+f85b914c61a0390c1c0ec4f51bb7dd7c3d238fd29902f4310f6d2d0acb82ed02
+
+[root@controller ~]# docker -H :4000 ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED              STATUS              PORTS               NAMES
+f85b914c61a0        nginx               "nginx -g 'daemon off"   21 seconds ago       Up 19 seconds       80/tcp, 443/tcp     compute3/web4
+b366e3aacae6        nginx               "nginx -g 'daemon off"   30 seconds ago       Up 29 seconds       80/tcp, 443/tcp     compute2/web3
+a7a017ad5dc2        nginx               "nginx -g 'daemon off"   About a minute ago   Up About a minute   80/tcp, 443/tcp     compute3/web2
+398fc3d1a0cb        nginx               "nginx -g 'daemon off"   9 minutes ago        Up 9 minutes        80/tcp, 443/tcp     compute2/web1
+ad2523852e1c        centos              "/bin/bash"              40 minutes ago       Up 40 minutes                           compute3/lonely_jepsen
+[root@controller ~]# 
+
+

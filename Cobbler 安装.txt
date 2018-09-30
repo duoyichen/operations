@@ -1,0 +1,343 @@
+
+
+
+
+Cobbler是一款比较成熟的自动化批量部署系统工具，他集成了PXE、DHCP、DNS、Kickstart服务管理和yum仓库管理工具，他能够自动化部署RedHat，CentOS类的系统，还能自动化定制我们的系统，是运维兄弟的好帮手。
+
+
+
+
+
+cat > /etc/sysconfig/network-scripts/ifcfg-eth0 <<eof
+TYPE=Ethernet
+BOOTPROTO=static
+NAME=eth0
+DEVICE=eth0
+ONBOOT=yes
+IPADDR=10.10.33.200
+NETMASK=255.255.0.0
+GATEWAY=10.10.0.252
+DEFROUTE=yes
+NM_CONTROLLED=no
+eof
+
+
+echo 'nameserver 10.10.0.252' > /etc/resolv.conf
+echo 'nameserver 1.2.4.8' >> /etc/resolv.conf
+echo 'nameserver 114.114.114.114' >> /etc/resolv.conf
+
+systemctl disable NetworkManager
+
+systemctl stop NetworkManager
+
+systemctl disable firewalld
+systemctl stop firewalld
+
+systemctl disable postfix
+systemctl stop postfix
+
+sed -i 's/SELINUX=enforcing/SELINUX=disabled/' /etc/selinux/config
+setenforce 0
+
+
+hostnamectl --static set-hostname cobbler
+
+
+sed -i 's/^GSSAPIAuthentication yes/GSSAPIAuthentication no/g' \
+/etc/ssh/sshd_config
+sed -i 's/^#UseDNS yes/UseDNS no/g' /etc/ssh/sshd_config
+
+安装Cobbler相关的依赖包及软件
+
+yum install -y createrepo httpd mkisofs python-netaddr python-urlgrabber \
+rsync syslinux tftp-server yum-utils mod_ssl mod_wsgi git make \
+python-devel python-setuptools fence-agents pykickstart \
+dhcp rpm-build ed patch perl-Compress-Zlib perl-libwww-perl perl-Digest-SHA
+virt-install
+
+yum install -y redhat-rpm-config python-simplejson genisoimage python-cheetah PyYAML httpd dhcp bind xinetd tftp-server
+
+
+
+安装 Cobbler 软件包
+
+yum install -y cobbler cobbler-web koan
+
+
+
+
+
+配置Cobbler
+
+
+#生成默认模板下系统安装完成之后root账号登录密码
+openssl passwd -1 -salt 'root' 'tendcloud2016'
+$1$root$Dg14ltd8gi.JL7I6kR/TW.
+
+
+vim /etc/cobbler/settings 按照如下进行修改
+
+manage_dhcp: 1
+
+manage_rsync: 1
+
+next_server: 10.10.33.200    (IP修改成本机地址)
+
+server: 10.10.33.200    (IP修改成本机地址)
+
+#root用户名，tendcloud2016是系统登录密码
+default_password_crypted: "$1$root$Dg14ltd8gi.JL7I6kR/TW."
+
+
+
+
+配置dhcp服务器
+
+vi /etc/cobbler/dhcp.template
+
+subnet 10.10.0.0 netmask 255.255.0.0 { #设置网段
+
+option routers             10.10.33.252; #设置网关
+
+option domain-name-servers 8.8.8.8,8.8.4.4; #设置dns服务器地址
+
+option subnet-mask         255.255.0.0; #设置子网掩码
+
+range dynamic-bootp        10.10.33.11 10.10.33.200;  #设置dhcp服务器IP地址租用的范围
+
+default-lease-time         21600;  #默认租约时间
+
+max-lease-time             43200;  #最大租约时间
+
+next-server                $next_server;
+
+class "pxeclients" {
+
+match if substring (option vendor-class-identifier, 0, 9) = "PXEClient";
+
+if option pxe-system-type = 00:02 {
+
+filename "ia64/elilo.efi";
+
+} else if option pxe-system-type = 00:06 {
+
+filename "grub/grub-x86.efi";
+
+} else if option pxe-system-type = 00:07 {
+
+filename "grub/grub-x86_64.efi";
+
+} else {
+
+filename "pxelinux.0";
+
+}
+
+}
+
+}
+
+cobbler sync  #同步配置文件到dhcp服务器
+
+
+systemctl start dhcpd
+systemctl enable dhcpd
+
+systemctl start cobblerd
+systemctl enable cobblerd
+
+
+
+
+制作安装源
+
+1.制作Cenots安装源和KS文件配置
+
+
+将CentOS-7.2 安装文件 copy 到 /var/www/cobbler/ks_mirror/Centos-7.2-x86_64/ 目录下
+
+导入系统镜像到cobbler ，需要时间比较久
+
+cobbler import --path=/var/www/cobbler/ks_mirror/Centos-7.2-x86_64/ --name=CentOS-7.2 --arch=x86_64
+
+设置profile，按照操作系统版本分别关联系统镜像文件和kickstart自动安装文件
+
+cobbler profile add --name=Centos-7.2-x86_64 --distro=Centos-7.2-x86_64 --kickstart=/var/lib/cobbler/kickstarts/centos-7.2-x86_64.cfg
+
+
+
+查看Cobbler的相关配置
+
+cobbler list
+cobbler report
+cobbler profile report
+cobbler distro list
+
+
+
+
+
+
+mount -t iso9660 -o loop /root/CentOS-7-x86_64-Everything-1708.iso /mnt/
+
+
+
+不需要手动cp
+
+#mkdir -p /var/www/cobbler/ks_mirror/CentOS-7.4-x86_64-aio
+#cp -rf /mnt/* /var/www/cobbler/ks_mirror/CentOS-7.4-x86_64
+
+
+
+命令格式：cobbler import --path=镜像路径 -- name=安装引导名 --arch=32位或64位
+
+cobbler import --name=CentOS-7.4 --path=/mnt --arch=x86_64
+
+会 cp 安装文件到 /var/www/cobbler/ks_mirror/CentOS-7.4-x86_64 下，生成 name 为 CentOS-7.4-x86_64 的 distro
+
+
+
+cp /var/lib/cobbler/kickstarts/CentOS-7.2-x86_64.ks /var/lib/cobbler/kickstarts/CentOS-7.4-x86_64.ks
+
+
+
+命令：cobbler profile add|edit|remove --name=安装引导名 --distro=系统镜像名 --kickstart=kickstart自动安装文件路径
+
+--name：自定义的安装引导名，注意不能重复
+
+--distro：系统安装镜像名，用cobbler distro list可以查看
+
+--kickstart：与系统镜像文件相关联的kickstart自动安装文件
+
+cobbler profile edit --name=CentOS-7.4-x86_64 --distro=CentOS-7.4-x86_64 --kickstart=/var/lib/cobbler/kickstarts/CentOS-7.4-x86_64.ks
+
+cobbler profile edit --name=CentOS-7.4-x86_64 --kopts='net.ifnames=0 biosdevname=0'
+
+
+
+cobbler sync
+
+systemctl restart dhcpd
+
+systemctl restart cobblerd
+
+
+
+
+
+cobbler profile remove --name=CentOS-7.4-x86_64
+
+cobbler distro remove --name=CentOS-7.4-x86_64
+
+
+
+
+
+
+
+
+
+
+
+
+
+1、镜像及目录挂载
+
+wget http://175.25.181.252/o/images/iso/centos/CentOS-6.8-x86_64-bin-DVD1.iso
+
+wget http://175.25.181.252/o/images/iso/centos/CentOS-6.8-x86_64-bin-DVD2.iso
+
+mkdir -p /mnt/cd{1,2,3}
+
+mount CentOS-6.8-x86_64-bin-DVD1.iso /mnt/cd1/
+
+mount CentOS-6.8-x86_64-bin-DVD2.iso /mnt/cd2/
+
+
+
+2、拷贝到一个文件夹
+
+cp -av /mnt/cd1/* /mnt/cd3/
+
+du -sh /mnt/cd1/
+du -sh /mnt/cd3/
+
+cp -v /mnt/cd2/Packages/* /mnt/cd3/Packages/
+
+
+
+3、合并TRANS.TBL
+
+将DVD2中TRANS.TBL的信息追加到DVD1中TRANS.TBL后面, 并排序保存 
+
+cat /mnt/cd1/Packages/TRANS.TBL 
+
+cat /mnt/cd2/Packages/TRANS.TBL >> /mnt/cd3/Packages/TRANS.TBL 
+
+grep yum-plugin-versionlock-1.1.30-37.el6.noarch.rpm /mnt/cd3/Packages/TRANS.TBL
+
+mv /mnt/cd3/Packages/TRANS.{TBL,TBL.bak} 
+
+ll /mnt/cd3/Packages/TRANS.*
+
+sort /mnt/cd3/Packages/TRANS.TBL.bak > /mnt/cd3/Packages/TRANS.TBL
+
+cat /mnt/cd3/Packages/TRANS.TBL
+
+rm -rf /mnt/cd3/Packages/TRANS.TBL.bak 
+
+现在，cd3 已经是合并后的文件了，可以用作本地源和做成ISO使用。
+
+
+
+4、制作安装源文件
+
+cd /var/lib/cobbler/kickstarts/
+
+cp CentOS-6.8-x86_64-Mini.ks CentOS-6.8-x86_64.ks
+
+cobbler import --path=/mnt/cd3/ --name=CentOS-6.8 --arch=x86_64
+
+cobbler profile edit --name=CentOS-6.8-x86_64 --kickstart=/var/lib/cobbler/kickstarts/CentOS-6.8-x86_64.ks
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+%post
+$SNIPPET('log_ks_post')
+# Start yum configuration
+$yum_config_stanza
+# End yum configuration
+$SNIPPET('post_install_kernel_options')
+$SNIPPET('post_install_network_config')
+$SNIPPET('func_register_if_enabled')
+$SNIPPET('download_config_files')
+$SNIPPET('koan_environment')
+$SNIPPET('redhat_register')
+$SNIPPET('cobbler_register')
+# Enable post-install boot notification
+yum install -y wget
+wget -O- http://175.25.181.252/o/script/centos_init_yum.sh|bash
+$SNIPPET('post_anamon')
+# Start final steps
+$SNIPPET('kickstart_done')
+# End final steps
+%end
+
+
+
+
+

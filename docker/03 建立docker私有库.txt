@@ -1,0 +1,271 @@
+建立docker私有库(docker registry)
+
+
+
+
+
+
+
+
+一、准备
+
+
+
+1、地址规划
+
+Docker 私有仓库地址：10.10.33.11
+Docker   客户端地址：10.10.33.31
+
+
+2、激活网卡
+
+vim /etc/sysconfig/network-scripts/ifcfg-eno16777728
+修改此行
+ONBOOT=yes
+/etc/init.d/network restart
+
+
+3、关闭本地防火墙并设置开机不自启动
+
+systemctl stop firewalld.service
+systemctl disable firewalld.service
+
+
+4、关闭本地selinux防火墙
+
+vi /etc/sysconfig/selinux 
+SELINUX=disabled
+setenforce 0   
+
+
+5、安装ifconfig工具
+
+#yum install -y net-tools
+
+
+
+
+
+二、安装
+
+
+
+1、安装docker
+
+yum install -y docker
+
+#yum upgrade -y device-mapper-libs
+service docker start
+chkconfig docker on
+
+
+2、本地私有仓库registry
+
+docker pull registry
+
+Trying to pull repository docker.io/registry ...
+24dd746e9b9f: Download complete 
+706766fe1019: Download complete 
+a62a42e77c9c: Download complete 
+2c014f14d3d9: Download complete 
+b7cf8f0d9e82: Download complete 
+d0b170ebeeab: Download complete 
+171efc310edf: Download complete 
+522ed614b07a: Download complete 
+605ed9113b86: Download complete 
+22b93b23ebb9: Download complete 
+2ac557a88fda: Download complete 
+1f3b4c532640: Download complete 
+27ebaac643a7: Download complete 
+ce630195cb45: Download complete 
+Status: Downloaded newer image for docker.io/registry:latest
+
+docker images
+REPOSITORY           TAG                 IMAGE ID            CREATED             VIRTUAL SIZE
+docker.io/registry   latest              24dd746e9b9f        3 days ago          413.8 MB
+
+
+3、基于私有仓库镜像运行容器
+
+docker run -d -p 5000:5000 -v /opt/data/registry:/tmp/registry docker.io/registry
+
+c60bbdbecd458b67e589131fb7b8ab2a5cabef1d62a5cf7ccf0a64101b26b610
+Usage of loopback devices is strongly discouraged for production use. Either use `--storage-opt dm.thinpooldev` or use `--storage-opt dm.no_warn_on_loop_devices=true` to suppress this warning.
+
+docker ps -a
+CONTAINER ID        IMAGE                       COMMAND             CREATED             STATUS              PORTS                    NAMES
+bb2c0d442df9        docker.io/registry:latest   "docker-registry"   10 seconds ago      Up 7 seconds        0.0.0.0:5000->5000/tcp   serene_hopper
+
+docker run -d -e GUNICORN_OPTS=["--preload"] -p 5000:5000 -v /opt/data/registry:/tmp/registry docker.io/registry
+
+
+4、访问私有仓库
+
+curl 127.0.0.1:5000/v1/search
+{"num_results": 0, "query": "", "results": []} //私有仓库为空，没有提交新镜像到仓库中
+
+
+5、从Docker Hub上下载一个ssh镜像
+
+docker search -s 10 centos
+              18                   [OK]
+docker pull centos
+
+docker images
+
+
+
+6、创建镜像链接或为基础镜像打个标签
+
+docker tag docker.io/centos 127.0.0.1:5000/centos7
+
+docker images
+
+REPOSITORY             TAG                 IMAGE ID            CREATED             VIRTUAL SIZE
+docker.io/registry     latest              24dd746e9b9f        3 days ago          413.8 MB
+docker.io/fedora/ssh   latest              2aeb2b6d9705        9 days ago          254.4 MB
+127.0.0.1:5000/ssh     latest              2aeb2b6d9705        9 days ago          254.4 MB
+
+
+7、修改Docker配置文件制定私有仓库url
+
+vim /etc/sysconfig/docker
+修改此行
+OPTIONS='--selinux-enabled --insecure-registry 10.10.33.11:5000'
+service docker restart
+Redirecting to /bin/systemctl restart  docker.service
+
+
+8、提交镜像到本地私有仓库中
+
+docker push 127.0.0.1:5000/centos7
+
+The push refers to a repository [127.0.0.1:5000/centos7] (len: 1)
+Sending image list
+Pushing repository 127.0.0.1:5000/centos7 (1 tags)
+1544084fad81: Image successfully pushed 
+df0fc3863fbc: Image successfully pushed 
+a3d54b467fad: Image successfully pushed 
+a65193109361: Image successfully pushed 
+Pushing tag for rev [a65193109361] on {http://127.0.0.1:5000/v1/repositories/centos7/tags/latest}
+
+
+9、查看私有仓库是否存在对应的镜像
+
+curl 127.0.0.1:5000/v1/search
+
+{"num_results": 1, "query": "", "results": [{"description": "", "name": "library/ssh"}]}
+
+
+10、查看镜像的存储目录和文件
+
+tree /opt/data/registry/repositories/
+
+/opt/data/registry/repositories/
+?..?? library
+    ?..?? centos7
+        ?..?? _index_images
+        ?..?? json
+        ?..?? tag_latest
+        ?..?? taglatest_json
+
+2 directories, 4 files
+2 directories, 4 files
+
+
+
+
+
+三、从私有仓库中下载已有的镜像
+
+
+
+1、登陆另外一台Docker客户端
+
+ssh root@10.10.33.31
+
+
+2、修改Docker配置文件
+
+vim /etc/sysconfig/docker
+
+修改此行
+OPTIONS='--selinux-enabled --insecure-registry 10.10.33.11:5000'
+
+service docker restart
+Redirecting to /bin/systemctl restart  docker.service
+
+
+3、从私有仓库中下载已有的镜像
+
+docker pull 10.10.33.11:5000/centos7
+
+docker images
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+我的目标还是无互联网安装，部署内部的docker私有库，目前docker镜像的获得还是需要互联网，将下载好的docker镜像发布到内部私有库上（可在有互联网的时候将容器打成tar包，在离线状况下使用参照《打包docker镜像并使用文件导入》）。
+ 
+1、使用fedora 20（IP为192.168.1.103）作为测试服务器（centos 7，redhat 7通用）
+ 
+2、安装docker
+
+yum -y install docker-io docker-registry  
+ 特别说明，fedora更新的docker 1.3.1提交到本地库有问题，有1.3.0的docker没问题。若以后再更新版本，按照上面的操作
+
+yum -y install httpmirrors.163.comfedoraupdates20x86_64docker-io-1.3.0-1.fc20.x86_64.rpm  
+ 
+3、启动并保持开机启动,安装docker registry
+
+systemctl start docker  
+systemctl start docker-registry  
+systemctl enable docker  
+systemctl enable docker-registry  
+ 
+
+docker run -p 5000:5000 registry  
+ 
+4、在线下载centos镜像
+
+docker pull centos  
+ 下载完成后执行
+
+docker images  
+ 
+5、将镜像做tag
+
+docker tag img_id localhost.localdomain5000centos_local  
+ 
+
+ 
+6、push镜像到本地库
+
+docker push localhost.localdomain5000centos_local   
+ 
+
+ 
+7、客户端下载这个私服的镜像
+
+docker pull 192.168.1.1035000centos_local  
+ 
+
+ 
+10、大功告成
