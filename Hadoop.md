@@ -1,9 +1,8 @@
 # Hadoop安装文档
-#### By：大官人
+<br><br><br>
 
-#### Email：DaGuanR@gmail.com
 
-#### QQ:375739049
+
 ## 一·伪分布式
 ### 1.1环境准备
 #### 1.1.1关闭iptables和selinux
