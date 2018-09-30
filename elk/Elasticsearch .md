@@ -1,7 +1,7 @@
 # Elasticsearch 
-#### By：大官人
-#### Email：DaGuanR@gmail.com
-#### QQ：375739049
+<br><br><br>
+
+
 
 # 一.安装JDK
 
@@ -29,7 +29,8 @@ ln -s /usr/local/elasticsearch-5.1.1 /usr/local/elasticsearch
 echo "vm.max_map_count= 262144" /etc/sysctl.conf
 sysctl -p
 cat>>/etc/security/limits.conf<<EOF
-*  hard nofile 65536*  soft nofile 65536
+*  hard nofile 65536
+*  soft nofile 65536
 EOF
 sed -i "s#1024#2048#g" /etc/security/limits.d/90-nproc.conf
 ```
