@@ -1,14 +1,3 @@
----
-title: Lvs+Keepalived高可用负载均衡
-categories: 运维
-tags:
-  - keepalived
-  - lvs
-  - 负载均衡
-description: descriptions
-toc: true
-date: 2018-10-02 04:21:48
----
 
 <br>
 ## 一. ARP协议
